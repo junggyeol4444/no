@@ -1,21 +1,35 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import AnalyzePanel from "@/components/AnalyzePanel";
 import { TextAreaField, TextField } from "@/components/Field";
 import type { Character } from "@/lib/types";
 
 type Draft = Omit<Character, "created_at">;
 
+function draft0(c: Character): Draft {
+  const { created_at, ...rest } = c;
+  void created_at;
+  return rest;
+}
+
 function CharacterCard({
   character,
+  index,
+  total,
+  reorderable,
   onSaved,
   onDeleted,
+  onMove,
 }: {
   character: Character;
+  index: number;
+  total: number;
+  reorderable: boolean;
   onSaved: (c: Character) => void;
   onDeleted: (id: number) => void;
+  onMove: (index: number, dir: -1 | 1) => void;
 }) {
   const [draft, setDraft] = useState<Draft>(() => draft0(character));
   const [open, setOpen] = useState(!character.appearance && !character.personality);
@@ -53,6 +67,26 @@ function CharacterCard({
   return (
     <div className="card">
       <div className="flex items-center gap-2">
+        {reorderable && (
+          <div className="flex flex-col text-ink-600">
+            <button
+              className="leading-none hover:text-ink-200 disabled:opacity-30"
+              disabled={index === 0}
+              onClick={() => onMove(index, -1)}
+              title="위로"
+            >
+              ▲
+            </button>
+            <button
+              className="leading-none hover:text-ink-200 disabled:opacity-30"
+              disabled={index === total - 1}
+              onClick={() => onMove(index, 1)}
+              title="아래로"
+            >
+              ▼
+            </button>
+          </div>
+        )}
         <button
           className="text-ink-500 hover:text-ink-200"
           onClick={() => setOpen((o) => !o)}
@@ -100,13 +134,6 @@ function CharacterCard({
   );
 }
 
-// 비교용 draft 정규화 (created_at 제외)
-function draft0(c: Character): Draft {
-  const { created_at, ...rest } = c;
-  void created_at;
-  return rest;
-}
-
 export default function CharacterManager({
   workId,
   initial,
@@ -118,6 +145,20 @@ export default function CharacterManager({
   const [items, setItems] = useState<Character[]>(initial);
   const [mode, setMode] = useState<"direct" | "analyze">("direct");
   const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((c) =>
+      [c.name, c.personality, c.goal, c.appearance, c.relationships, c.notes]
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [items, query]);
+
+  const reorderable = query.trim().length === 0;
 
   async function add() {
     setAdding(true);
@@ -132,6 +173,27 @@ export default function CharacterManager({
     } finally {
       setAdding(false);
     }
+  }
+
+  async function move(index: number, dir: -1 | 1) {
+    const j = index + dir;
+    if (j < 0 || j >= items.length) return;
+    const next = [...items];
+    [next[index], next[j]] = [next[j], next[index]];
+    const normalized = next.map((c, i) => ({ ...c, order_index: i }));
+    const changed = normalized.filter(
+      (c) => items.find((o) => o.id === c.id)?.order_index !== c.order_index,
+    );
+    setItems(normalized);
+    await Promise.all(
+      changed.map((c) =>
+        fetch(`/api/characters/${c.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_index: c.order_index }),
+        }),
+      ),
+    );
   }
 
   return (
@@ -170,15 +232,29 @@ export default function CharacterManager({
         />
       ) : (
         <div className="space-y-3">
-          {items.length === 0 && (
+          {items.length > 3 && (
+            <input
+              className="field-input"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="캐릭터 검색… (검색 중에는 순서 변경 비활성)"
+            />
+          )}
+          {filtered.length === 0 && (
             <div className="card text-center text-sm text-ink-400">
-              아직 캐릭터가 없습니다. 아래 버튼으로 추가하거나, 자동 분석으로 한 번에 등록하세요.
+              {items.length === 0
+                ? "아직 캐릭터가 없습니다. 아래 버튼으로 추가하거나, 자동 분석으로 한 번에 등록하세요."
+                : "검색 결과가 없습니다."}
             </div>
           )}
-          {items.map((c) => (
+          {filtered.map((c) => (
             <CharacterCard
               key={c.id}
               character={c}
+              index={items.indexOf(c)}
+              total={items.length}
+              reorderable={reorderable}
+              onMove={move}
               onSaved={(u) =>
                 setItems((prev) => prev.map((x) => (x.id === u.id ? u : x)))
               }

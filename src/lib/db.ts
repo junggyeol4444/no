@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS characters (
   relationships TEXT NOT NULL DEFAULT '',
   secrets TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  order_index INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS world_settings (
   category TEXT NOT NULL DEFAULT '용어',
   title TEXT NOT NULL,
   content TEXT NOT NULL DEFAULT '',
+  order_index INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -66,6 +68,8 @@ CREATE TABLE IF NOT EXISTS chapters (
   word_count INTEGER NOT NULL DEFAULT 0,
   summary TEXT NOT NULL DEFAULT '',
   beat TEXT NOT NULL DEFAULT '',
+  included_character_ids TEXT NOT NULL DEFAULT '',
+  included_world_ids TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
@@ -100,7 +104,24 @@ function createConnection(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+// 기존 DB에 신규 컬럼을 더하는 가벼운 마이그레이션 (CREATE IF NOT EXISTS 로는 컬럼 추가 불가)
+function migrate(db: Database.Database): void {
+  const ensureColumn = (table: string, col: string, ddl: string) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as {
+      name: string;
+    }[];
+    if (!cols.some((c) => c.name === col)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    }
+  };
+  ensureColumn("characters", "order_index", "order_index INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("world_settings", "order_index", "order_index INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("chapters", "included_character_ids", "included_character_ids TEXT NOT NULL DEFAULT ''");
+  ensureColumn("chapters", "included_world_ids", "included_world_ids TEXT NOT NULL DEFAULT ''");
 }
 
 const globalForDb = globalThis as unknown as {

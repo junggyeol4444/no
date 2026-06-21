@@ -1,5 +1,10 @@
 import { badRequest, json, parseId, serverError } from "@/lib/http";
-import { createChapter, getWork, listChapters } from "@/lib/repo";
+import {
+  createChapter,
+  getWork,
+  insertChapterAfter,
+  listChapters,
+} from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +26,10 @@ export async function POST(
   if (!getWork(workId)) return badRequest("작품이 존재하지 않습니다");
   try {
     const body = await req.json().catch(() => ({}));
+    // { after: N } 이면 N화 다음에 끼워넣고 이후 번호를 민다
+    if (Number.isInteger(body.after) && body.after > 0) {
+      return json(insertChapterAfter(workId, body.after), 201);
+    }
     return json(createChapter(workId, body), 201);
   } catch (err) {
     return serverError(err instanceof Error ? err.message : "회차 생성 실패");

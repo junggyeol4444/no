@@ -124,7 +124,12 @@ export default function PlotTimeline({
   const [tlWho, setTlWho] = useState("");
   const [tlChapter, setTlChapter] = useState("");
   const [checking, setChecking] = useState(false);
-  const [warnings, setWarnings] = useState<string[] | null>(null);
+  const [check, setCheck] = useState<{
+    warnings: string[];
+    rule_warnings: string[];
+    ai_ok: boolean;
+    ai_message?: string;
+  } | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
 
   async function addPlot() {
@@ -195,12 +200,17 @@ export default function PlotTimeline({
   async function runCheck() {
     setChecking(true);
     setCheckError(null);
-    setWarnings(null);
+    setCheck(null);
     try {
       const res = await fetch(`/api/works/${workId}/check`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "점검 실패");
-      setWarnings(data.warnings ?? []);
+      setCheck({
+        warnings: data.warnings ?? [],
+        rule_warnings: data.rule_warnings ?? [],
+        ai_ok: data.ai_ok ?? false,
+        ai_message: data.ai_message,
+      });
     } catch (e) {
       setCheckError(e instanceof Error ? e.message : "오류");
     } finally {
@@ -233,23 +243,46 @@ export default function PlotTimeline({
           {checkError}
         </div>
       )}
-      {warnings !== null &&
-        (warnings.length === 0 ? (
-          <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
-            ✓ 명백한 모순을 찾지 못했습니다.
-          </div>
-        ) : (
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
-            <p className="mb-1 text-xs font-semibold text-amber-300">
-              ⚠ 모순 가능성 {warnings.length}건
-            </p>
-            <ul className="list-inside list-disc space-y-1 text-sm text-amber-100/90">
-              {warnings.map((w, i) => (
-                <li key={i}>{w}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
+      {check && (
+        <div className="space-y-2">
+          {check.rule_warnings.length > 0 && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+              <p className="mb-1 text-xs font-semibold text-amber-300">
+                📐 규칙 기반 점검 {check.rule_warnings.length}건
+              </p>
+              <ul className="list-inside list-disc space-y-1 text-sm text-amber-100/90">
+                {check.rule_warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {check.ai_ok && check.warnings.length > 0 && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+              <p className="mb-1 text-xs font-semibold text-amber-300">
+                🔎 AI 검수 {check.warnings.length}건
+              </p>
+              <ul className="list-inside list-disc space-y-1 text-sm text-amber-100/90">
+                {check.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {check.ai_ok &&
+            check.warnings.length === 0 &&
+            check.rule_warnings.length === 0 && (
+              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+                ✓ 명백한 모순을 찾지 못했습니다.
+              </div>
+            )}
+          {!check.ai_ok && (
+            <div className="rounded-md border border-ink-700 bg-ink-900 px-3 py-2 text-xs text-ink-400">
+              AI 검수는 건너뜀{check.ai_message ? ` — ${check.ai_message}` : ""} · 규칙 기반 결과만 표시
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 플롯 라인 */}
       <section>

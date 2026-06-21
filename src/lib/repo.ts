@@ -78,7 +78,9 @@ export function deleteWork(id: number): void {
 
 export function listCharacters(workId: number): Character[] {
   return db
-    .prepare("SELECT * FROM characters WHERE work_id = ? ORDER BY id ASC")
+    .prepare(
+      "SELECT * FROM characters WHERE work_id = ? ORDER BY order_index ASC, id ASC",
+    )
     .all(workId) as Character[];
 }
 
@@ -88,6 +90,15 @@ export function getCharacter(id: number): Character | undefined {
     | undefined;
 }
 
+function nextOrder(table: string, workId: number): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(MAX(order_index), -1) AS m FROM ${table} WHERE work_id = ?`,
+    )
+    .get(workId) as { m: number };
+  return row.m + 1;
+}
+
 export function createCharacter(
   workId: number,
   input: Partial<Character>,
@@ -95,8 +106,8 @@ export function createCharacter(
   const info = db
     .prepare(
       `INSERT INTO characters
-        (work_id, name, appearance, personality, speech_style, goal, relationships, secrets, notes)
-       VALUES (@work_id, @name, @appearance, @personality, @speech_style, @goal, @relationships, @secrets, @notes)`,
+        (work_id, name, appearance, personality, speech_style, goal, relationships, secrets, notes, order_index)
+       VALUES (@work_id, @name, @appearance, @personality, @speech_style, @goal, @relationships, @secrets, @notes, @order_index)`,
     )
     .run({
       work_id: workId,
@@ -108,6 +119,7 @@ export function createCharacter(
       relationships: input.relationships ?? "",
       secrets: input.secrets ?? "",
       notes: input.notes ?? "",
+      order_index: input.order_index ?? nextOrder("characters", workId),
     });
   touchWork(workId);
   return getCharacter(Number(info.lastInsertRowid))!;
@@ -123,7 +135,7 @@ export function updateCharacter(
   db.prepare(
     `UPDATE characters SET name=@name, appearance=@appearance, personality=@personality,
        speech_style=@speech_style, goal=@goal, relationships=@relationships,
-       secrets=@secrets, notes=@notes
+       secrets=@secrets, notes=@notes, order_index=@order_index
      WHERE id=@id`,
   ).run(merged);
   touchWork(existing.work_id);
@@ -141,7 +153,7 @@ export function deleteCharacter(id: number): void {
 export function listWorldSettings(workId: number): WorldSetting[] {
   return db
     .prepare(
-      "SELECT * FROM world_settings WHERE work_id = ? ORDER BY category, id ASC",
+      "SELECT * FROM world_settings WHERE work_id = ? ORDER BY order_index ASC, id ASC",
     )
     .all(workId) as WorldSetting[];
 }
@@ -158,14 +170,15 @@ export function createWorldSetting(
 ): WorldSetting {
   const info = db
     .prepare(
-      `INSERT INTO world_settings (work_id, category, title, content)
-       VALUES (@work_id, @category, @title, @content)`,
+      `INSERT INTO world_settings (work_id, category, title, content, order_index)
+       VALUES (@work_id, @category, @title, @content, @order_index)`,
     )
     .run({
       work_id: workId,
       category: input.category ?? "용어",
       title: input.title?.trim() || "제목 없는 항목",
       content: input.content ?? "",
+      order_index: input.order_index ?? nextOrder("world_settings", workId),
     });
   touchWork(workId);
   return getWorldSetting(Number(info.lastInsertRowid))!;
@@ -179,7 +192,7 @@ export function updateWorldSetting(
   if (!existing) return undefined;
   const merged = { ...existing, ...input, id };
   db.prepare(
-    `UPDATE world_settings SET category=@category, title=@title, content=@content WHERE id=@id`,
+    `UPDATE world_settings SET category=@category, title=@title, content=@content, order_index=@order_index WHERE id=@id`,
   ).run(merged);
   touchWork(existing.work_id);
   return getWorldSetting(id);
@@ -296,8 +309,8 @@ export function createChapter(
   const body = input.body ?? "";
   const info = db
     .prepare(
-      `INSERT INTO chapters (work_id, number, title, body, status, word_count, summary, beat)
-       VALUES (@work_id, @number, @title, @body, @status, @word_count, @summary, @beat)`,
+      `INSERT INTO chapters (work_id, number, title, body, status, word_count, summary, beat, included_character_ids, included_world_ids)
+       VALUES (@work_id, @number, @title, @body, @status, @word_count, @summary, @beat, @included_character_ids, @included_world_ids)`,
     )
     .run({
       work_id: workId,
@@ -308,9 +321,25 @@ export function createChapter(
       word_count: countChars(body),
       summary: input.summary ?? "",
       beat: input.beat ?? "",
+      included_character_ids: input.included_character_ids ?? "",
+      included_world_ids: input.included_world_ids ?? "",
     });
   touchWork(workId);
   return getChapter(Number(info.lastInsertRowid))!;
+}
+
+/** afterNumber 다음에 회차를 끼워넣고 이후 회차 번호를 한 칸씩 민다 */
+export function insertChapterAfter(
+  workId: number,
+  afterNumber: number,
+): Chapter {
+  const tx = db.transaction(() => {
+    db.prepare(
+      "UPDATE chapters SET number = number + 1 WHERE work_id = ? AND number > ?",
+    ).run(workId, afterNumber);
+    return createChapter(workId, { number: afterNumber + 1 });
+  });
+  return tx();
 }
 
 export function updateChapter(
@@ -323,7 +352,9 @@ export function updateChapter(
   merged.word_count = countChars(merged.body ?? "");
   db.prepare(
     `UPDATE chapters SET number=@number, title=@title, body=@body, status=@status,
-       word_count=@word_count, summary=@summary, beat=@beat, updated_at=@updated_at
+       word_count=@word_count, summary=@summary, beat=@beat,
+       included_character_ids=@included_character_ids, included_world_ids=@included_world_ids,
+       updated_at=@updated_at
      WHERE id=@id`,
   ).run({ ...merged, updated_at: now() });
   touchWork(existing.work_id);

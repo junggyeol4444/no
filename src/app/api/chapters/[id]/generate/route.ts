@@ -17,6 +17,17 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
 
+/** CSV id 목록으로 선별. 비어 있으면 전체 (기획안 §6 등장인물 선별) */
+function pickByIds<T extends { id: number }>(items: T[], csv: string): T[] {
+  const ids = csv
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length === 0) return items;
+  const set = new Set(ids);
+  return items.filter((i) => set.has(i.id));
+}
+
 export async function POST(
   req: Request,
   { params }: { params: { id: string } },
@@ -51,8 +62,14 @@ export async function POST(
 
   const gen = generateChapterStream({
     work,
-    characters: listCharacters(work.id),
-    worldSettings: listWorldSettings(work.id),
+    characters: pickByIds(
+      listCharacters(work.id),
+      chapter.included_character_ids,
+    ),
+    worldSettings: pickByIds(
+      listWorldSettings(work.id),
+      chapter.included_world_ids,
+    ),
     prevChapter: getPreviousChapter(work.id, chapter.number) ?? null,
     timeline: listTimeline(work.id),
     chapter: { number: chapter.number, beat: chapter.beat },

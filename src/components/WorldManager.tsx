@@ -1,25 +1,36 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import AnalyzePanel from "@/components/AnalyzePanel";
 import { WORLD_CATEGORIES, type WorldSetting } from "@/lib/types";
 
-type Draft = Pick<WorldSetting, "id" | "work_id" | "category" | "title" | "content">;
+type Draft = Pick<
+  WorldSetting,
+  "id" | "work_id" | "category" | "title" | "content" | "order_index"
+>;
 
 function draft0(w: WorldSetting): Draft {
-  const { id, work_id, category, title, content } = w;
-  return { id, work_id, category, title, content };
+  const { id, work_id, category, title, content, order_index } = w;
+  return { id, work_id, category, title, content, order_index };
 }
 
 function WorldCard({
   item,
+  index,
+  total,
+  reorderable,
   onSaved,
   onDeleted,
+  onMove,
 }: {
   item: WorldSetting;
+  index: number;
+  total: number;
+  reorderable: boolean;
   onSaved: (w: WorldSetting) => void;
   onDeleted: (id: number) => void;
+  onMove: (index: number, dir: -1 | 1) => void;
 }) {
   const [draft, setDraft] = useState<Draft>(() => draft0(item));
   const [saving, setSaving] = useState(false);
@@ -55,6 +66,26 @@ function WorldCard({
   return (
     <div className="card">
       <div className="flex flex-wrap items-center gap-2">
+        {reorderable && (
+          <div className="flex flex-col text-ink-600">
+            <button
+              className="leading-none hover:text-ink-200 disabled:opacity-30"
+              disabled={index === 0}
+              onClick={() => onMove(index, -1)}
+              title="위로"
+            >
+              ▲
+            </button>
+            <button
+              className="leading-none hover:text-ink-200 disabled:opacity-30"
+              disabled={index === total - 1}
+              onClick={() => onMove(index, 1)}
+              title="아래로"
+            >
+              ▼
+            </button>
+          </div>
+        )}
         <select
           className="rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-ink-200"
           value={draft.category}
@@ -104,6 +135,17 @@ export default function WorldManager({
   const [items, setItems] = useState<WorldSetting[]>(initial);
   const [mode, setMode] = useState<"direct" | "analyze">("direct");
   const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((w) =>
+      [w.title, w.content, w.category].join(" ").toLowerCase().includes(q),
+    );
+  }, [items, query]);
+
+  const reorderable = query.trim().length === 0;
 
   async function add() {
     setAdding(true);
@@ -118,6 +160,27 @@ export default function WorldManager({
     } finally {
       setAdding(false);
     }
+  }
+
+  async function move(index: number, dir: -1 | 1) {
+    const j = index + dir;
+    if (j < 0 || j >= items.length) return;
+    const next = [...items];
+    [next[index], next[j]] = [next[j], next[index]];
+    const normalized = next.map((w, i) => ({ ...w, order_index: i }));
+    const changed = normalized.filter(
+      (w) => items.find((o) => o.id === w.id)?.order_index !== w.order_index,
+    );
+    setItems(normalized);
+    await Promise.all(
+      changed.map((w) =>
+        fetch(`/api/world/${w.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_index: w.order_index }),
+        }),
+      ),
+    );
   }
 
   return (
@@ -156,15 +219,29 @@ export default function WorldManager({
         />
       ) : (
         <div className="space-y-3">
-          {items.length === 0 && (
+          {items.length > 3 && (
+            <input
+              className="field-input"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="설정 검색… (검색 중에는 순서 변경 비활성)"
+            />
+          )}
+          {filtered.length === 0 && (
             <div className="card text-center text-sm text-ink-400">
-              아직 설정이 없습니다. 직접 추가하거나 자동 분석으로 등록하세요.
+              {items.length === 0
+                ? "아직 설정이 없습니다. 직접 추가하거나 자동 분석으로 등록하세요."
+                : "검색 결과가 없습니다."}
             </div>
           )}
-          {items.map((w) => (
+          {filtered.map((w) => (
             <WorldCard
               key={w.id}
               item={w}
+              index={items.indexOf(w)}
+              total={items.length}
+              reorderable={reorderable}
+              onMove={move}
               onSaved={(u) =>
                 setItems((prev) => prev.map((x) => (x.id === u.id ? u : x)))
               }

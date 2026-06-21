@@ -28,6 +28,13 @@ export default function ChapterList({
   const [chapters, setChapters] = useState<Chapter[]>(initial);
   const [creating, setCreating] = useState(false);
 
+  async function reload() {
+    const res = await fetch(`/api/works/${workId}/chapters`, {
+      cache: "no-store",
+    });
+    setChapters(await res.json());
+  }
+
   async function createChapter() {
     setCreating(true);
     try {
@@ -41,6 +48,15 @@ export default function ChapterList({
     } finally {
       setCreating(false);
     }
+  }
+
+  async function insertAfter(number: number) {
+    await fetch(`/api/works/${workId}/chapters`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ after: number }),
+    });
+    await reload();
   }
 
   async function setStatus(id: number, status: ChapterStatus) {
@@ -59,18 +75,40 @@ export default function ChapterList({
     setChapters((prev) => prev.filter((c) => c.id !== id));
   }
 
+  const totalChars = chapters.reduce((s, c) => s + c.word_count, 0);
+
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="font-serif text-xl font-semibold">회차 목록</h1>
           <p className="text-sm text-ink-400">
-            전체 {chapters.length}화 · 목표 분량 {defaultLength.toLocaleString()}자
+            전체 {chapters.length}화 · {totalChars.toLocaleString()}자 · 목표{" "}
+            {defaultLength.toLocaleString()}자/회
           </p>
         </div>
-        <button className="btn-primary" onClick={createChapter} disabled={creating}>
-          {creating ? "생성 중…" : "+ 새 회차"}
-        </button>
+        <div className="flex items-center gap-2">
+          {chapters.length > 0 && (
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-ink-500">전체 내보내기:</span>
+              <a
+                className="btn-ghost !px-2 !py-1"
+                href={`/api/works/${workId}/export?format=txt`}
+              >
+                txt
+              </a>
+              <a
+                className="btn-ghost !px-2 !py-1"
+                href={`/api/works/${workId}/export?format=md`}
+              >
+                md
+              </a>
+            </div>
+          )}
+          <button className="btn-primary" onClick={createChapter} disabled={creating}>
+            {creating ? "생성 중…" : "+ 새 회차"}
+          </button>
+        </div>
       </div>
 
       {chapters.length === 0 ? (
@@ -86,7 +124,7 @@ export default function ChapterList({
             return (
               <div
                 key={c.id}
-                className="flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900 px-4 py-3"
+                className="group flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900 px-4 py-3"
               >
                 <span className="w-12 shrink-0 font-serif text-lg font-semibold text-ink-300">
                   {c.number}화
@@ -110,6 +148,13 @@ export default function ChapterList({
                     </span>
                   </div>
                 </Link>
+                <button
+                  className="btn-ghost hidden text-xs group-hover:inline-flex"
+                  onClick={() => insertAfter(c.number)}
+                  title="이 회차 다음에 삽입"
+                >
+                  ↳삽입
+                </button>
                 <select
                   className={`rounded px-2 py-1 text-xs font-medium ${STATUS_STYLE[c.status]}`}
                   value={c.status}
@@ -124,7 +169,7 @@ export default function ChapterList({
                 <a
                   className="btn-ghost"
                   href={`/api/chapters/${c.id}/export`}
-                  title="txt 내보내기"
+                  title="이 회차 txt 내보내기"
                 >
                   ⬇
                 </a>

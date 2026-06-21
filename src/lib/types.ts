@@ -43,6 +43,7 @@ export interface Character {
   relationships: string;
   secrets: string;
   notes: string;
+  order_index: number;
   created_at: string;
 }
 
@@ -52,6 +53,7 @@ export interface WorldSetting {
   category: string;
   title: string;
   content: string;
+  order_index: number;
   created_at: string;
 }
 
@@ -78,6 +80,10 @@ export interface Chapter {
   summary: string;
   /** 이번 회차 목표 사건(beat) */
   beat: string;
+  /** 이 회차 집필에 주입할 캐릭터 id 목록 (CSV). 빈 값이면 전체 (기획안 §6 등장인물 선별) */
+  included_character_ids: string;
+  /** 이 회차 집필에 주입할 세계관 항목 id 목록 (CSV). 빈 값이면 전체 */
+  included_world_ids: string;
   created_at: string;
   updated_at: string;
 }
