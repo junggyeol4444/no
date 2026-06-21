@@ -24,9 +24,13 @@ export default function RootLayout({
                 WebNovel Studio
               </span>
             </Link>
-            <span className="text-xs text-ink-500">
-              AI 자동 집필 + 작가 보조 도구
-            </span>
+            <Link
+              href="/settings"
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-sm text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+            >
+              <span>⚙️</span>
+              <span className="hidden sm:inline">AI 설정</span>
+            </Link>
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>

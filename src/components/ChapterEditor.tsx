@@ -31,12 +31,14 @@ export default function ChapterEditor({
   characters,
   worldSettings,
   prevChapter,
+  ai,
 }: {
   work: EditorWork;
   chapter: Chapter;
   characters: Character[];
   worldSettings: WorldSetting[];
   prevChapter: { number: number; summary: string } | null;
+  ai: { provider: string; model: string };
 }) {
   const [title, setTitle] = useState(chapter.title);
   const [beat, setBeat] = useState(chapter.beat);
@@ -119,14 +121,34 @@ export default function ChapterEditor({
           currentBody: body,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "집필 실패");
 
-      if (mode === "continue") {
-        setBody((b) => (b.trim() ? `${b.trimEnd()}\n\n${data.text.trim()}` : data.text.trim()));
-      } else {
-        setBody(data.text.trim());
+      // 사용 불가(키 없음/Ollama 미실행)면 스트림 전에 400 JSON 반환
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "집필 실패");
       }
+
+      // 실시간 스트리밍 수신 (① 생성되는 걸 바로 보기)
+      const base =
+        mode === "continue" && body.trim() ? `${body.trimEnd()}\n\n` : "";
+      let acc = base;
+      setBody(base);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setBody(acc);
+      }
+
+      // 생성 결과 자동 저장 (실시간 출력물 유실 방지)
+      await fetch(`/api/chapters/${chapter.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, beat, body: acc, status }),
+      });
+      setBaseline({ title, beat, body: acc, status });
     } catch (e) {
       setError(e instanceof Error ? e.message : "오류");
     } finally {
@@ -301,6 +323,12 @@ export default function ChapterEditor({
             <p className="field-label">주입 컨텍스트</p>
             <p className="text-xs text-ink-400">
               아래 정보가 AI 집필 시 제약 조건으로 함께 전달됩니다.
+            </p>
+            <p className="mt-2 text-xs text-ink-500">
+              엔진:{" "}
+              <span className="text-ink-300">
+                {ai.provider === "ollama" ? "로컬 Ollama" : "Claude"} · {ai.model}
+              </span>
             </p>
           </div>
 

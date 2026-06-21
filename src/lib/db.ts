@@ -79,6 +79,11 @@ CREATE TABLE IF NOT EXISTS timeline_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_characters_work ON characters(work_id);
 CREATE INDEX IF NOT EXISTS idx_world_work ON world_settings(work_id);
 CREATE INDEX IF NOT EXISTS idx_plot_work ON plot_points(work_id);

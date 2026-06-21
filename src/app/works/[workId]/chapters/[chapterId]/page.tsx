@@ -1,5 +1,6 @@
 import Link from "next/link";
 import ChapterEditor from "@/components/ChapterEditor";
+import { getActiveAiInfo } from "@/lib/ai";
 import { parseId } from "@/lib/http";
 import {
   getChapter,
@@ -48,6 +49,7 @@ export default function ChapterEditorPage({
       characters={listCharacters(work.id)}
       worldSettings={listWorldSettings(work.id)}
       prevChapter={prev ? { number: prev.number, summary: prev.summary } : null}
+      ai={getActiveAiInfo()}
     />
   );
 }

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { getAiSettings } from "./repo";
 import type {
   AnalysisResult,
   Chapter,
@@ -11,22 +12,40 @@ import type {
 // ─────────────────────────────────────────────────────────────────────────
 // AI 공급자 추상화 (기획안 §4, §6).
 //   - 기본: 로컬 LLM (Ollama) — API 키·인터넷 불필요
-//   - 옵션: Anthropic Claude 클라우드 (AI_PROVIDER=anthropic)
-// AI 호출은 전부 callModel() 한 곳을 거치므로 공급자만 갈아끼우면 됩니다.
+//   - 옵션: Anthropic Claude 클라우드
+// 공급자/모델은 DB 설정(화면에서 변경) → 환경변수 → 기본값 순으로 결정됩니다.
+// 모든 AI 호출은 callModel()/streamModel() 한 곳을 거칩니다.
 // ─────────────────────────────────────────────────────────────────────────
 
 export type Provider = "ollama" | "anthropic";
 
-export const PROVIDER: Provider =
-  process.env.AI_PROVIDER === "anthropic" ? "anthropic" : "ollama";
+interface AiConfig {
+  provider: Provider;
+  ollamaBaseUrl: string;
+  ollamaModel: string;
+  anthropicModel: string;
+}
 
-export const ANTHROPIC_MODEL =
-  process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
-export const OLLAMA_BASE_URL =
-  process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:7b";
+function cfg(): AiConfig {
+  const s = getAiSettings();
+  return {
+    provider: s.provider === "anthropic" ? "anthropic" : "ollama",
+    ollamaBaseUrl: s.ollamaBaseUrl,
+    ollamaModel: s.ollamaModel,
+    anthropicModel: s.anthropicModel,
+  };
+}
 
-/** 키 미설정 / Ollama 미실행 등 "AI를 쓸 수 없는" 상태 (사용자 안내용 400) */
+/** 화면 표시용 현재 AI 정보 */
+export function getActiveAiInfo(): { provider: Provider; model: string } {
+  const c = cfg();
+  return {
+    provider: c.provider,
+    model: c.provider === "anthropic" ? c.anthropicModel : c.ollamaModel,
+  };
+}
+
+/** 키 미설정 / Ollama 미실행·모델 없음 등 "AI를 쓸 수 없는" 상태 (사용자 안내용) */
 export class AiUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -38,46 +57,106 @@ interface CallOpts {
   system: string;
   user: string;
   maxTokens?: number;
-  /** JSON 응답을 강제 (Ollama format:"json") */
   json?: boolean;
 }
 
 // ───────────────────────────── Ollama ────────────────────────────────────
 
+function ollamaBody(c: AiConfig, opts: CallOpts, stream: boolean) {
+  return JSON.stringify({
+    model: c.ollamaModel,
+    messages: [
+      { role: "system", content: opts.system },
+      { role: "user", content: opts.user },
+    ],
+    stream,
+    ...(opts.json ? { format: "json" } : {}),
+    options: { num_predict: opts.maxTokens ?? 8000 },
+  });
+}
+
+function ollamaUnreachable(c: AiConfig): AiUnavailableError {
+  return new AiUnavailableError(
+    `로컬 LLM(Ollama)에 연결할 수 없습니다 (${c.ollamaBaseUrl}). ` +
+      `Ollama가 실행 중인지 확인하세요. (설치: https://ollama.com · 실행: 'ollama serve')`,
+  );
+}
+
 async function callOllama(opts: CallOpts): Promise<string> {
+  const c = cfg();
   let res: Response;
   try {
-    res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    res = await fetch(`${c.ollamaBaseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        messages: [
-          { role: "system", content: opts.system },
-          { role: "user", content: opts.user },
-        ],
-        stream: false,
-        ...(opts.json ? { format: "json" } : {}),
-        options: { num_predict: opts.maxTokens ?? 8000 },
-      }),
+      body: ollamaBody(c, opts, false),
     });
   } catch {
-    throw new AiUnavailableError(
-      `로컬 LLM(Ollama)에 연결할 수 없습니다 (${OLLAMA_BASE_URL}). ` +
-        `Ollama가 실행 중인지 확인하세요. (설치: https://ollama.com · 실행: 'ollama serve')`,
-    );
+    throw ollamaUnreachable(c);
   }
-  if (res.status === 404) {
+  if (res.status === 404)
     throw new AiUnavailableError(
-      `Ollama에 모델 '${OLLAMA_MODEL}' 이 없습니다. 'ollama pull ${OLLAMA_MODEL}' 로 먼저 받아주세요.`,
+      `Ollama에 모델 '${c.ollamaModel}' 이 없습니다. 'ollama pull ${c.ollamaModel}' 로 받거나 설정에서 다른 모델을 고르세요.`,
     );
-  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`Ollama 오류 ${res.status}: ${body.slice(0, 200)}`);
   }
   const data = (await res.json()) as { message?: { content?: string } };
   return data.message?.content ?? "";
+}
+
+async function* streamOllama(opts: CallOpts): AsyncGenerator<string> {
+  const c = cfg();
+  let res: Response;
+  try {
+    res = await fetch(`${c.ollamaBaseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: ollamaBody(c, opts, true),
+    });
+  } catch {
+    throw ollamaUnreachable(c);
+  }
+  if (!res.ok || !res.body)
+    throw new Error(`Ollama 스트리밍 오류 ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      try {
+        const obj = JSON.parse(line) as {
+          message?: { content?: string };
+          done?: boolean;
+        };
+        if (obj.message?.content) yield obj.message.content;
+      } catch {
+        /* 부분 라인 무시 */
+      }
+    }
+  }
+}
+
+/** 설치된 로컬 모델 목록 (설정 UI 드롭다운용) */
+export async function getInstalledOllamaModels(): Promise<string[]> {
+  const c = cfg();
+  try {
+    const res = await fetch(`${c.ollamaBaseUrl}/api/tags`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { models?: { name: string }[] };
+    return (data.models ?? []).map((m) => m.name);
+  } catch {
+    return [];
+  }
 }
 
 // ──────────────────────────── Anthropic ──────────────────────────────────
@@ -87,7 +166,7 @@ let anthropicClient: Anthropic | null = null;
 function getAnthropic(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY)
     throw new AiUnavailableError(
-      "ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env.local 에 키를 추가하거나 AI_PROVIDER=ollama 로 로컬 모델을 쓰세요.",
+      "ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env.local 에 키를 추가하거나 설정에서 로컬(Ollama)을 사용하세요.",
     );
   if (!anthropicClient) anthropicClient = new Anthropic();
   return anthropicClient;
@@ -102,7 +181,7 @@ function textOf(message: Anthropic.Message): string {
 
 async function callAnthropic(opts: CallOpts): Promise<string> {
   const message = await getAnthropic().messages.create({
-    model: ANTHROPIC_MODEL,
+    model: cfg().anthropicModel,
     max_tokens: opts.maxTokens ?? 8000,
     system: opts.system,
     messages: [{ role: "user", content: opts.user }],
@@ -110,13 +189,72 @@ async function callAnthropic(opts: CallOpts): Promise<string> {
   return textOf(message);
 }
 
+async function* streamAnthropic(opts: CallOpts): AsyncGenerator<string> {
+  const stream = getAnthropic().messages.stream({
+    model: cfg().anthropicModel,
+    max_tokens: opts.maxTokens ?? 8000,
+    system: opts.system,
+    messages: [{ role: "user", content: opts.user }],
+  });
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
+  }
+}
+
 // ───────────────────────────── 라우팅 ────────────────────────────────────
 
 export async function callModel(opts: CallOpts): Promise<string> {
-  return PROVIDER === "anthropic" ? callAnthropic(opts) : callOllama(opts);
+  return cfg().provider === "anthropic"
+    ? callAnthropic(opts)
+    : callOllama(opts);
 }
 
-/** 모델 응답 문자열에서 JSON 오브젝트를 관대하게 추출 (코드펜스/잡설 제거) */
+export function streamModel(opts: CallOpts): AsyncGenerator<string> {
+  return cfg().provider === "anthropic"
+    ? streamAnthropic(opts)
+    : streamOllama(opts);
+}
+
+/** 스트리밍 시작 전 공급자 사용 가능 여부를 미리 확인 (스트림 중간엔 상태코드를 못 바꾸므로) */
+export async function assertProviderReady(): Promise<void> {
+  const c = cfg();
+  if (c.provider === "anthropic") {
+    if (!process.env.ANTHROPIC_API_KEY)
+      throw new AiUnavailableError(
+        "ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env.local 에 키를 추가하거나 설정에서 로컬(Ollama)을 사용하세요.",
+      );
+    return;
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${c.ollamaBaseUrl}/api/tags`);
+  } catch {
+    throw ollamaUnreachable(c);
+  }
+  if (!res.ok) throw new AiUnavailableError(`Ollama 응답 오류 (${res.status}).`);
+  const data = (await res.json()) as { models?: { name: string }[] };
+  const names = (data.models ?? []).map((m) => m.name);
+  const want = c.ollamaModel;
+  const present = names.some(
+    (n) =>
+      n === want ||
+      n === `${want}:latest` ||
+      n.startsWith(`${want}:`) ||
+      (!want.includes(":") && n.split(":")[0] === want),
+  );
+  if (!present)
+    throw new AiUnavailableError(
+      `Ollama에 모델 '${want}' 이 없습니다. 'ollama pull ${want}' 로 받거나 설정에서 다른 모델을 고르세요.` +
+        (names.length ? ` (설치됨: ${names.join(", ")})` : ""),
+    );
+}
+
+/** 모델 응답 문자열에서 JSON 오브젝트를 관대하게 추출 */
 function extractJson<T>(text: string): T {
   let t = text.trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -314,9 +452,11 @@ ${input.condition ? `이번 회차 조건(일회성): ${input.condition}\n` : ""
   return blocks.join("\n\n");
 }
 
-export async function generateChapter(input: ChapterGenInput): Promise<string> {
+function buildChapterPrompt(input: ChapterGenInput): {
+  system: string;
+  user: string;
+} {
   const context = buildChapterContext(input);
-
   const system = `당신은 한국어 웹소설 작가입니다. 주어진 작품 정보·등장인물·세계관·플롯·맥락을 '제약 조건'으로 삼아, 그 안에서만 회차 본문을 집필합니다.
 
 집필 규칙:
@@ -335,11 +475,20 @@ ${input.currentBody || ""}`;
     instruction = `위 정보를 바탕으로 ${input.chapter.number}화 본문을 처음부터 집필하세요.`;
   }
 
-  return callModel({
-    system,
-    user: `${context}\n\n---\n\n${instruction}`,
-    maxTokens: 8000,
-  });
+  return { system, user: `${context}\n\n---\n\n${instruction}` };
+}
+
+export async function generateChapter(input: ChapterGenInput): Promise<string> {
+  const { system, user } = buildChapterPrompt(input);
+  return callModel({ system, user, maxTokens: 8000 });
+}
+
+/** 본문을 토큰 단위로 스트리밍 (기획안 ① 실시간 출력) */
+export function generateChapterStream(
+  input: ChapterGenInput,
+): AsyncGenerator<string> {
+  const { system, user } = buildChapterPrompt(input);
+  return streamModel({ system, user, maxTokens: 8000 });
 }
 
 // ───────────── 회차 요약 + 새 사건 추출 (§6 출력 후 처리) ─────────────────

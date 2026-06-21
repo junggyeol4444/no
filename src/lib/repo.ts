@@ -388,3 +388,55 @@ export function createTimelineEvent(
 export function deleteTimelineEvent(id: number): void {
   db.prepare("DELETE FROM timeline_events WHERE id = ?").run(id);
 }
+
+// ──────────────────────────── Settings ───────────────────────────────────
+
+export function getSetting(key: string): string | undefined {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value;
+}
+
+export function setSetting(key: string, value: string): void {
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(key, value);
+}
+
+export interface AiSettings {
+  provider: string;
+  ollamaBaseUrl: string;
+  ollamaModel: string;
+  anthropicModel: string;
+}
+
+/** AI 설정: DB 값 우선, 없으면 환경변수, 없으면 기본값 */
+export function getAiSettings(): AiSettings {
+  return {
+    provider:
+      getSetting("ai_provider") || process.env.AI_PROVIDER || "ollama",
+    ollamaBaseUrl:
+      getSetting("ollama_base_url") ||
+      process.env.OLLAMA_BASE_URL ||
+      "http://localhost:11434",
+    ollamaModel:
+      getSetting("ollama_model") || process.env.OLLAMA_MODEL || "qwen2.5:7b",
+    anthropicModel:
+      getSetting("anthropic_model") ||
+      process.env.ANTHROPIC_MODEL ||
+      "claude-sonnet-4-6",
+  };
+}
+
+export function saveAiSettings(s: Partial<AiSettings>): AiSettings {
+  if (s.provider === "ollama" || s.provider === "anthropic")
+    setSetting("ai_provider", s.provider);
+  if (typeof s.ollamaBaseUrl === "string")
+    setSetting("ollama_base_url", s.ollamaBaseUrl.trim() || "http://localhost:11434");
+  if (typeof s.ollamaModel === "string" && s.ollamaModel.trim())
+    setSetting("ollama_model", s.ollamaModel.trim());
+  if (typeof s.anthropicModel === "string" && s.anthropicModel.trim())
+    setSetting("anthropic_model", s.anthropicModel.trim());
+  return getAiSettings();
+}
