@@ -14,10 +14,12 @@
 # 1. 의존성 설치
 npm install
 
-# 2. 환경 변수 설정
-cp .env.example .env.local
-#   .env.local 을 열어 ANTHROPIC_API_KEY 를 채워넣으세요.
-#   (키는 https://console.anthropic.com 에서 발급)
+# 2. AI 모델 준비
+#   [기본] 로컬 Ollama — API 키·인터넷 불필요
+#     1) https://ollama.com 설치
+#     2) ollama pull qwen2.5:7b   (가벼운 PC면 qwen2.5:3b)
+#   [옵션] Claude 클라우드를 쓰려면:
+#     cp .env.example .env.local 후 AI_PROVIDER=anthropic + ANTHROPIC_API_KEY 설정
 
 # 3. 개발 서버 실행
 npm run dev
@@ -27,17 +29,20 @@ npm run dev
 npm run build && npm start
 ```
 
-> **AI 기능(자동 집필·설정 분석·일관성 점검)** 은 `ANTHROPIC_API_KEY` 가 있어야 동작합니다.
-> 키가 없어도 CRUD(작품/캐릭터/세계관/회차/플롯) 와 txt 내보내기는 모두 사용할 수 있으며,
-> AI 호출 시에는 친절한 안내 메시지를 보여줍니다.
+> **AI 기능(자동 집필·설정 분석·일관성 점검)** 은 로컬 Ollama(기본) 또는 Claude 클라우드로 동작합니다.
+> 모델이 준비되지 않아도 CRUD(작품/캐릭터/세계관/회차/플롯)와 txt 내보내기는 모두 쓸 수 있고,
+> AI 호출 시 연결이 안 되면 친절한 안내 메시지를 보여줍니다.
 
-### 환경 변수
+### 환경 변수 (모두 선택 — 기본값으로 바로 동작)
 
-| 변수 | 필수 | 기본값 | 설명 |
-| --- | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | AI 기능에 필수 | — | Anthropic Claude API 키 |
-| `ANTHROPIC_MODEL` | 선택 | `claude-sonnet-4-6` | 본문 생성·분석에 사용할 모델 |
-| `DATABASE_PATH` | 선택 | `./data/webnovel.db` | SQLite 파일 경로 |
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AI_PROVIDER` | `ollama` | `ollama`(로컬) 또는 `anthropic`(클라우드) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | 로컬 Ollama 주소 |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | 로컬 모델 (가벼운 PC면 `qwen2.5:3b`) |
+| `ANTHROPIC_API_KEY` | — | `AI_PROVIDER=anthropic` 일 때 필요 |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | 클라우드 모델 |
+| `DATABASE_PATH` | `./data/webnovel.db` | SQLite 파일 경로 |
 
 ---
 
@@ -49,7 +54,8 @@ npm run build && npm start
 - **Next.js 14 (App Router) + React 18 + TypeScript** — UI와 API Routes를 한 코드베이스로
 - **Tailwind CSS** — 스타일
 - **SQLite (better-sqlite3)** — 로컬 단일 파일 DB (확장 시 PostgreSQL로 교체 가능)
-- **Anthropic Claude API (`@anthropic-ai/sdk`)** — 본문 생성·설정 분석·일관성 점검
+- **AI: 로컬 LLM(Ollama) 기본 + Anthropic Claude 옵션** — 공급자 추상화 계층(`src/lib/ai.ts`)으로
+  `AI_PROVIDER` 환경변수만 바꾸면 전환. 기본은 키 없이 오프라인으로 도는 로컬 모델.
 
 > 별도의 Express 서버 + Vite 대신 Next.js API Routes로 통합해, 실행·배포 단위를 하나로 줄였습니다.
 
@@ -121,7 +127,7 @@ src/
 └─ lib/
    ├─ db.ts        # SQLite 연결 + 스키마
    ├─ repo.ts      # 데이터 접근 계층
-   ├─ anthropic.ts # Claude 호출 (집필/분석/요약/점검)
+   ├─ ai.ts        # AI 공급자 추상화 (Ollama/Anthropic) — 집필/분석/요약/점검
    ├─ types.ts     # 도메인 타입
    └─ http.ts      # API 응답 헬퍼
 ```

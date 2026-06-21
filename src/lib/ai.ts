@@ -9,35 +9,111 @@ import type {
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────
-// Anthropic Claude API 연동 (기획안 §4, §6).
-// 본문 생성용 모델은 Sonnet 계열을 기본값으로 사용 (환경변수로 override 가능).
+// AI 공급자 추상화 (기획안 §4, §6).
+//   - 기본: 로컬 LLM (Ollama) — API 키·인터넷 불필요
+//   - 옵션: Anthropic Claude 클라우드 (AI_PROVIDER=anthropic)
+// AI 호출은 전부 callModel() 한 곳을 거치므로 공급자만 갈아끼우면 됩니다.
 // ─────────────────────────────────────────────────────────────────────────
 
-export const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+export type Provider = "ollama" | "anthropic";
 
-export class MissingApiKeyError extends Error {
-  constructor() {
-    super(
-      "ANTHROPIC_API_KEY 가 설정되지 않았습니다. 프로젝트 루트의 .env.local 에 키를 추가하세요.",
-    );
-    this.name = "MissingApiKeyError";
+export const PROVIDER: Provider =
+  process.env.AI_PROVIDER === "anthropic" ? "anthropic" : "ollama";
+
+export const ANTHROPIC_MODEL =
+  process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+export const OLLAMA_BASE_URL =
+  process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:7b";
+
+/** 키 미설정 / Ollama 미실행 등 "AI를 쓸 수 없는" 상태 (사용자 안내용 400) */
+export class AiUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AiUnavailableError";
   }
 }
 
-let client: Anthropic | null = null;
-
-function getClient(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) throw new MissingApiKeyError();
-  if (!client) client = new Anthropic();
-  return client;
+interface CallOpts {
+  system: string;
+  user: string;
+  maxTokens?: number;
+  /** JSON 응답을 강제 (Ollama format:"json") */
+  json?: boolean;
 }
 
-/** 응답에서 text 블록만 이어붙여 반환 */
+// ───────────────────────────── Ollama ────────────────────────────────────
+
+async function callOllama(opts: CallOpts): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages: [
+          { role: "system", content: opts.system },
+          { role: "user", content: opts.user },
+        ],
+        stream: false,
+        ...(opts.json ? { format: "json" } : {}),
+        options: { num_predict: opts.maxTokens ?? 8000 },
+      }),
+    });
+  } catch {
+    throw new AiUnavailableError(
+      `로컬 LLM(Ollama)에 연결할 수 없습니다 (${OLLAMA_BASE_URL}). ` +
+        `Ollama가 실행 중인지 확인하세요. (설치: https://ollama.com · 실행: 'ollama serve')`,
+    );
+  }
+  if (res.status === 404) {
+    throw new AiUnavailableError(
+      `Ollama에 모델 '${OLLAMA_MODEL}' 이 없습니다. 'ollama pull ${OLLAMA_MODEL}' 로 먼저 받아주세요.`,
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Ollama 오류 ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const data = (await res.json()) as { message?: { content?: string } };
+  return data.message?.content ?? "";
+}
+
+// ──────────────────────────── Anthropic ──────────────────────────────────
+
+let anthropicClient: Anthropic | null = null;
+
+function getAnthropic(): Anthropic {
+  if (!process.env.ANTHROPIC_API_KEY)
+    throw new AiUnavailableError(
+      "ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env.local 에 키를 추가하거나 AI_PROVIDER=ollama 로 로컬 모델을 쓰세요.",
+    );
+  if (!anthropicClient) anthropicClient = new Anthropic();
+  return anthropicClient;
+}
+
 function textOf(message: Anthropic.Message): string {
   return message.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
+}
+
+async function callAnthropic(opts: CallOpts): Promise<string> {
+  const message = await getAnthropic().messages.create({
+    model: ANTHROPIC_MODEL,
+    max_tokens: opts.maxTokens ?? 8000,
+    system: opts.system,
+    messages: [{ role: "user", content: opts.user }],
+  });
+  return textOf(message);
+}
+
+// ───────────────────────────── 라우팅 ────────────────────────────────────
+
+export async function callModel(opts: CallOpts): Promise<string> {
+  return PROVIDER === "anthropic" ? callAnthropic(opts) : callOllama(opts);
 }
 
 /** 모델 응답 문자열에서 JSON 오브젝트를 관대하게 추출 (코드펜스/잡설 제거) */
@@ -51,57 +127,33 @@ function extractJson<T>(text: string): T {
   return JSON.parse(t) as T;
 }
 
-/** 기본 메시지 호출 헬퍼 */
-export async function callModel(opts: {
-  system: string;
-  user: string;
-  maxTokens?: number;
-}): Promise<string> {
-  const message = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: opts.maxTokens ?? 8000,
-    system: opts.system,
-    messages: [{ role: "user", content: opts.user }],
-  });
-  return textOf(message);
-}
-
 // ─────────────────────────── 설정 자동 분석 (§2-1-A) ─────────────────────────
 
 const CHARACTER_SCHEMA_HINT = `{
   "characters": [
-    {
-      "name": "이름",
-      "appearance": "외형 묘사",
-      "personality": "성격",
-      "speech_style": "말투 특징",
-      "goal": "목표/동기",
-      "relationships": "다른 인물과의 관계",
-      "secrets": "비밀 설정",
-      "notes": "기타 메모"
-    }
+    { "name": "이름", "appearance": "외형 묘사", "personality": "성격",
+      "speech_style": "말투 특징", "goal": "목표/동기", "relationships": "관계",
+      "secrets": "비밀 설정", "notes": "기타 메모" }
   ],
   "world_settings": [],
-  "suggestions": ["누락되었거나 모호한 설정에 대한 보완 질문/제안"]
+  "suggestions": ["누락/모호한 설정에 대한 보완 질문이나 제안"]
 }`;
 
 const WORLD_SCHEMA_HINT = `{
   "characters": [],
   "world_settings": [
-    {
-      "category": "시대/배경 | 규칙/시스템 | 지명 | 세력 | 용어 | 기타 중 하나",
-      "title": "항목 제목",
-      "content": "항목 상세 내용"
-    }
+    { "category": "시대/배경 | 규칙/시스템 | 지명 | 세력 | 용어 | 기타 중 하나",
+      "title": "항목 제목", "content": "항목 상세 내용" }
   ],
-  "suggestions": ["누락되었거나 모호한 설정에 대한 보완 질문/제안"]
+  "suggestions": ["누락/모호한 설정에 대한 보완 질문이나 제안"]
 }`;
 
 export async function analyzeSettings(
   rawText: string,
   target: "characters" | "world",
 ): Promise<AnalysisResult> {
-  const schema = target === "characters" ? CHARACTER_SCHEMA_HINT : WORLD_SCHEMA_HINT;
+  const schema =
+    target === "characters" ? CHARACTER_SCHEMA_HINT : WORLD_SCHEMA_HINT;
   const focus =
     target === "characters"
       ? "작가가 붙여넣은 텍스트에서 '등장인물' 정보를 추출해 캐릭터 카드 필드로 정리하세요. 인물이 여러 명이면 각각 분리하세요."
@@ -112,8 +164,8 @@ export async function analyzeSettings(
 규칙:
 - 텍스트에 실제로 적힌 내용만 사용하고, 사실을 지어내지 마세요.
 - 명시되지 않은 필드는 빈 문자열("")로 두세요.
-- 누락되었거나 모호해서 작가의 확인이 필요한 부분은 "suggestions" 배열에 한국어 질문/제안으로 담으세요.
-- 반드시 아래 스키마와 동일한 형태의 JSON '하나만' 출력하세요. 마크다운, 설명, 코드펜스 없이 순수 JSON만 출력합니다.
+- 누락/모호해 작가 확인이 필요한 부분은 "suggestions" 배열에 한국어로 담으세요.
+- 반드시 아래 스키마와 동일한 형태의 JSON '하나만' 출력하세요. 마크다운/설명/코드펜스 없이 순수 JSON.
 
 스키마:
 ${schema}`;
@@ -122,6 +174,7 @@ ${schema}`;
     system,
     user: rawText,
     maxTokens: 4000,
+    json: true,
   });
 
   const parsed = extractJson<Partial<AnalysisResult>>(out);
@@ -182,6 +235,7 @@ export async function checkConsistency(input: {
     system,
     user: parts.join("\n\n"),
     maxTokens: 2000,
+    json: true,
   });
   const parsed = extractJson<{ warnings?: string[] }>(out);
   return { warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [] };
@@ -198,15 +252,12 @@ export interface ChapterGenInput {
   prevChapter?: Pick<Chapter, "number" | "summary"> | null;
   timeline: TimelineEvent[];
   chapter: Pick<Chapter, "number" | "beat">;
-  /** 이번 회차 일회성 자연어 조건 */
   condition?: string;
   mode: WriteMode;
-  /** 이어쓰기/재생성 시 현재 본문 */
   currentBody?: string;
   targetLength: number;
 }
 
-/** §6 의 프롬프트 컨텍스트를 조립 */
 function buildChapterContext(input: ChapterGenInput): string {
   const { work, characters, worldSettings, prevChapter, timeline, chapter } =
     input;
@@ -314,6 +365,7 @@ export async function summarizeChapter(input: {
     system,
     user: `참고 등장인물: ${input.characterNames.join(", ") || "없음"}\n\n[${input.chapterNumber}화 본문]\n${input.body}`,
     maxTokens: 1500,
+    json: true,
   });
 
   const parsed = extractJson<Partial<SummarizeResult>>(out);

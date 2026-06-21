@@ -1,8 +1,8 @@
 import {
   generateChapter,
-  MissingApiKeyError,
+  AiUnavailableError,
   type WriteMode,
-} from "@/lib/anthropic";
+} from "@/lib/ai";
 import { badRequest, json, notFound, parseId, serverError } from "@/lib/http";
 import {
   getChapter,
@@ -55,7 +55,7 @@ export async function POST(
     });
     return json({ text });
   } catch (err) {
-    if (err instanceof MissingApiKeyError) return badRequest(err.message);
+    if (err instanceof AiUnavailableError) return badRequest(err.message);
     return serverError(err instanceof Error ? err.message : "집필 실패");
   }
 }

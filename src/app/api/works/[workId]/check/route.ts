@@ -1,4 +1,4 @@
-import { checkConsistency, MissingApiKeyError } from "@/lib/anthropic";
+import { checkConsistency, AiUnavailableError } from "@/lib/ai";
 import { badRequest, json, parseId, serverError } from "@/lib/http";
 import {
   getWork,
@@ -44,7 +44,7 @@ export async function POST(
     });
     return json(result);
   } catch (err) {
-    if (err instanceof MissingApiKeyError) return badRequest(err.message);
+    if (err instanceof AiUnavailableError) return badRequest(err.message);
     if (err instanceof SyntaxError)
       return serverError("AI 응답을 해석하지 못했습니다. 다시 시도해 주세요.");
     return serverError(err instanceof Error ? err.message : "점검 실패");

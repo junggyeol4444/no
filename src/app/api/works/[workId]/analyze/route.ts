@@ -1,4 +1,4 @@
-import { analyzeSettings, MissingApiKeyError } from "@/lib/anthropic";
+import { analyzeSettings, AiUnavailableError } from "@/lib/ai";
 import { badRequest, json, parseId, serverError } from "@/lib/http";
 import { getWork } from "@/lib/repo";
 
@@ -28,7 +28,7 @@ export async function POST(
     const result = await analyzeSettings(text, target);
     return json(result);
   } catch (err) {
-    if (err instanceof MissingApiKeyError) return badRequest(err.message);
+    if (err instanceof AiUnavailableError) return badRequest(err.message);
     if (err instanceof SyntaxError)
       return serverError("AI 응답을 해석하지 못했습니다. 다시 시도해 주세요.");
     return serverError(err instanceof Error ? err.message : "분석 실패");

@@ -1,4 +1,4 @@
-import { MissingApiKeyError, summarizeChapter } from "@/lib/anthropic";
+import { AiUnavailableError, summarizeChapter } from "@/lib/ai";
 import { badRequest, json, notFound, parseId, serverError } from "@/lib/http";
 import {
   getChapter,
@@ -38,7 +38,7 @@ export async function POST(
     updateChapter(id, { summary: result.summary });
     return json(result);
   } catch (err) {
-    if (err instanceof MissingApiKeyError) return badRequest(err.message);
+    if (err instanceof AiUnavailableError) return badRequest(err.message);
     if (err instanceof SyntaxError)
       return serverError("AI 응답을 해석하지 못했습니다. 다시 시도해 주세요.");
     return serverError(err instanceof Error ? err.message : "요약 실패");
