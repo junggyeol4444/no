@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "sample": "tsx scripts/sample.ts",
     "test": "rm -f data/test.db* ; DATABASE_PATH=./data/test.db node --import tsx --test \"test/*.test.ts\""
   },
   "dependencies": {
