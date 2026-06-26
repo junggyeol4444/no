@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS chapters (
   beat TEXT NOT NULL DEFAULT '',
   included_character_ids TEXT NOT NULL DEFAULT '',
   included_world_ids TEXT NOT NULL DEFAULT '',
+  published INTEGER NOT NULL DEFAULT 0,
+  published_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
@@ -86,6 +88,16 @@ CREATE TABLE IF NOT EXISTS timeline_events (
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS publish_targets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'webhook',
+  label TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_characters_work ON characters(work_id);
@@ -122,6 +134,8 @@ function migrate(db: Database.Database): void {
   ensureColumn("world_settings", "order_index", "order_index INTEGER NOT NULL DEFAULT 0");
   ensureColumn("chapters", "included_character_ids", "included_character_ids TEXT NOT NULL DEFAULT ''");
   ensureColumn("chapters", "included_world_ids", "included_world_ids TEXT NOT NULL DEFAULT ''");
+  ensureColumn("chapters", "published", "published INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("chapters", "published_at", "published_at TEXT");
 }
 
 const globalForDb = globalThis as unknown as {

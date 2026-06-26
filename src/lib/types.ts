@@ -84,8 +84,22 @@ export interface Chapter {
   included_character_ids: string;
   /** 이 회차 집필에 주입할 세계관 항목 id 목록 (CSV). 빈 값이면 전체 */
   included_world_ids: string;
+  /** 공개 독자 사이트 발행 여부 (0/1) */
+  published: number;
+  published_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** 발행 자동 업로드 대상 (웹훅/디스코드) */
+export interface PublishTarget {
+  id: number;
+  work_id: number;
+  type: string; // "webhook" | "discord"
+  label: string;
+  url: string;
+  enabled: number;
+  created_at: string;
 }
 
 export interface TimelineEvent {

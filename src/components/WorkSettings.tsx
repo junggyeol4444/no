@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { TextAreaField, TextField } from "@/components/Field";
+import PublishTargets from "@/components/PublishTargets";
 import type { Work } from "@/lib/types";
 
 export default function WorkSettings({ work }: { work: Work }) {
@@ -98,6 +99,10 @@ export default function WorkSettings({ work }: { work: Work }) {
         {savedAt && !dirty && (
           <span className="text-xs text-ink-500">{savedAt} 저장됨</span>
         )}
+      </div>
+
+      <div className="mt-8 border-t border-ink-800 pt-6">
+        <PublishTargets workId={work.id} />
       </div>
 
       <div className="mt-10 rounded-lg border border-red-500/30 bg-red-500/5 p-4">

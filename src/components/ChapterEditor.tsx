@@ -62,6 +62,8 @@ export default function ChapterEditor({
   const [status, setStatus] = useState<ChapterStatus>(chapter.status);
   const [summary, setSummary] = useState(chapter.summary);
   const [persistent, setPersistent] = useState(work.persistent_conditions);
+  const [published, setPublished] = useState(chapter.published === 1);
+  const [publishing, setPublishing] = useState(false);
   const [selChars, setSelChars] = useState<Set<number>>(() =>
     parseIds(chapter.included_character_ids, characters),
   );
@@ -253,6 +255,38 @@ export default function ChapterEditor({
     abortRef.current?.abort();
   }
 
+  async function togglePublish() {
+    setPublishing(true);
+    setError(null);
+    try {
+      // 발행 전 저장하지 않은 변경이 있으면 먼저 저장
+      if (!published && dirty) await persist();
+      const res = await fetch(`/api/chapters/${chapter.id}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ published: !published }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "발행 실패");
+      setPublished(data.chapter.published === 1);
+      const fails = (data.sent ?? []).filter(
+        (s: { ok: boolean }) => !s.ok,
+      );
+      if (fails.length) {
+        alert(
+          "일부 자동 업로드 실패:\n" +
+            fails
+              .map((f: { label: string; error?: string }) => `- ${f.label}: ${f.error}`)
+              .join("\n"),
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "오류");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   async function summarize() {
     setBusy("summarize");
     setError(null);
@@ -363,7 +397,28 @@ export default function ChapterEditor({
         >
           {busy === "save" ? "저장 중…" : dirty ? "저장*" : "저장됨"}
         </button>
+        <button
+          className={published ? "btn-secondary" : "btn-ghost"}
+          onClick={togglePublish}
+          disabled={publishing}
+          title="공개 독자 사이트에 발행"
+        >
+          {publishing ? "처리 중…" : published ? "🌐 공개 중" : "발행"}
+        </button>
       </div>
+
+      {published && (
+        <p className="mb-2 text-right text-xs">
+          <a
+            href={`/read/${work.id}/${chapter.number}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-amber-400 hover:underline"
+          >
+            독자 페이지에서 보기 ↗
+          </a>
+        </p>
+      )}
 
       {savedAt && !dirty && (
         <p className="mb-2 text-right text-xs text-ink-500">{savedAt} 자동 저장됨</p>

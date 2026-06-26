@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import SiteHeader from "@/components/SiteHeader";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,23 +16,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className="min-h-screen">
-        <header className="sticky top-0 z-20 border-b border-ink-800 bg-ink-950/90 backdrop-blur">
-          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
-            <Link href="/" className="flex items-center gap-2">
-              <span className="text-lg">✒️</span>
-              <span className="font-serif text-lg font-semibold tracking-tight">
-                WebNovel Studio
-              </span>
-            </Link>
-            <Link
-              href="/settings"
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-sm text-ink-400 hover:bg-ink-800 hover:text-ink-100"
-            >
-              <span>⚙️</span>
-              <span className="hidden sm:inline">AI 설정</span>
-            </Link>
-          </div>
-        </header>
+        <SiteHeader />
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
       </body>
     </html>

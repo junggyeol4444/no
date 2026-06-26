@@ -155,6 +155,17 @@ export default function ChapterList({
                 >
                   ↳삽입
                 </button>
+                {c.published === 1 && (
+                  <a
+                    href={`/read/${workId}/${c.number}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="chip bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                    title="공개 중 — 독자 페이지 보기"
+                  >
+                    공개
+                  </a>
+                )}
                 <select
                   className={`rounded px-2 py-1 text-xs font-medium ${STATUS_STYLE[c.status]}`}
                   value={c.status}

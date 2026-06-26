@@ -3,6 +3,7 @@ import type {
   Chapter,
   Character,
   PlotPoint,
+  PublishTarget,
   TimelineEvent,
   Work,
   WorldSetting,
@@ -354,6 +355,7 @@ export function updateChapter(
     `UPDATE chapters SET number=@number, title=@title, body=@body, status=@status,
        word_count=@word_count, summary=@summary, beat=@beat,
        included_character_ids=@included_character_ids, included_world_ids=@included_world_ids,
+       published=@published, published_at=@published_at,
        updated_at=@updated_at
      WHERE id=@id`,
   ).run({ ...merged, updated_at: now() });
@@ -365,6 +367,106 @@ export function deleteChapter(id: number): void {
   const existing = getChapter(id);
   db.prepare("DELETE FROM chapters WHERE id = ?").run(id);
   if (existing) touchWork(existing.work_id);
+}
+
+export function setChapterPublished(
+  id: number,
+  published: boolean,
+): Chapter | undefined {
+  const ch = getChapter(id);
+  if (!ch) return undefined;
+  db.prepare(
+    "UPDATE chapters SET published=?, published_at=?, updated_at=? WHERE id=?",
+  ).run(
+    published ? 1 : 0,
+    published ? (ch.published_at ?? now()) : null,
+    now(),
+    id,
+  );
+  touchWork(ch.work_id);
+  return getChapter(id);
+}
+
+// ── 공개 독자 사이트용 조회 ───────────────────────────────────────────────
+
+/** 발행된 회차가 1개 이상 있는 작품들 */
+export function listPublishedWorks(): Work[] {
+  return db
+    .prepare(
+      `SELECT w.* FROM works w
+       WHERE EXISTS (SELECT 1 FROM chapters c WHERE c.work_id = w.id AND c.published = 1)
+       ORDER BY w.updated_at DESC`,
+    )
+    .all() as Work[];
+}
+
+export function listPublishedChapters(workId: number): Chapter[] {
+  return db
+    .prepare(
+      "SELECT * FROM chapters WHERE work_id = ? AND published = 1 ORDER BY number ASC",
+    )
+    .all(workId) as Chapter[];
+}
+
+export function getPublishedChapter(
+  workId: number,
+  number: number,
+): Chapter | undefined {
+  return db
+    .prepare(
+      "SELECT * FROM chapters WHERE work_id = ? AND number = ? AND published = 1",
+    )
+    .get(workId, number) as Chapter | undefined;
+}
+
+// ── 발행 대상(자동 업로드) ────────────────────────────────────────────────
+
+export function listPublishTargets(workId: number): PublishTarget[] {
+  return db
+    .prepare("SELECT * FROM publish_targets WHERE work_id = ? ORDER BY id ASC")
+    .all(workId) as PublishTarget[];
+}
+
+export function getPublishTarget(id: number): PublishTarget | undefined {
+  return db.prepare("SELECT * FROM publish_targets WHERE id = ?").get(id) as
+    | PublishTarget
+    | undefined;
+}
+
+export function createPublishTarget(
+  workId: number,
+  input: Partial<PublishTarget>,
+): PublishTarget {
+  const info = db
+    .prepare(
+      `INSERT INTO publish_targets (work_id, type, label, url, enabled)
+       VALUES (@work_id, @type, @label, @url, @enabled)`,
+    )
+    .run({
+      work_id: workId,
+      type: input.type === "discord" ? "discord" : "webhook",
+      label: input.label ?? "",
+      url: input.url ?? "",
+      enabled: input.enabled === 0 ? 0 : 1,
+    });
+  return getPublishTarget(Number(info.lastInsertRowid))!;
+}
+
+export function updatePublishTarget(
+  id: number,
+  input: Partial<PublishTarget>,
+): PublishTarget | undefined {
+  const existing = getPublishTarget(id);
+  if (!existing) return undefined;
+  const merged = { ...existing, ...input, id };
+  db.prepare(
+    "UPDATE publish_targets SET type=@type, label=@label, url=@url, enabled=@enabled WHERE id=@id",
+  ).run(merged);
+  return getPublishTarget(id);
+}
+
+export function deletePublishTarget(id: number): void {
+  db.prepare("DELETE FROM publish_targets WHERE id = ?").run(id);
 }
 
 export interface ChapterStats {

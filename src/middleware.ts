@@ -9,7 +9,12 @@ export function middleware(req: NextRequest) {
   if (!pw) return NextResponse.next();
 
   const { pathname } = req.nextUrl;
-  if (pathname === "/login" || pathname === "/api/login") {
+  // 공개 독자 사이트와 로그인은 비밀번호 없이 접근 가능
+  if (
+    pathname === "/login" ||
+    pathname === "/api/login" ||
+    pathname.startsWith("/read")
+  ) {
     return NextResponse.next();
   }
 
