@@ -34,6 +34,8 @@ if not exist "node_modules" (
 echo.
 echo [2/2] 프로그램을 시작합니다. 잠시 후 브라우저가 자동으로 열립니다.
 echo       (종료하려면 이 검은 창을 닫으세요.)
+echo       (자동으로 안 열리면 브라우저 주소창에 localhost:3000 을 입력하세요.)
 echo.
-start "" cmd /c "timeout /t 7 >nul & start http://localhost:3000"
+rem 약 8초 대기 후 브라우저 열기 (ping 은 timeout 과 달리 리다이렉트 이슈가 없음)
+start "" /min cmd /c "ping -n 9 127.0.0.1 >nul & start http://localhost:3000"
 call npm run dev
