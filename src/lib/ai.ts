@@ -90,8 +90,16 @@ async function callOllama(opts: CallOpts): Promise<string> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: ollamaBody(c, opts, false),
+      // Next.js가 응답을 캐시하지 않도록 (매번 실제 로컬 모델 호출)
+      cache: "no-store",
+      // 응답이 아예 안 오는 상황에서 무한 대기 방지 (분석·요약 등 비스트리밍 호출)
+      signal: AbortSignal.timeout(180_000),
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "TimeoutError")
+      throw new AiUnavailableError(
+        `로컬 모델 응답이 3분을 넘겨 중단했습니다. 더 작은 모델(예: qwen2.5:3b)을 쓰거나 설정에서 클라우드(Claude)로 바꿔보세요.`,
+      );
     throw ollamaUnreachable(c);
   }
   if (res.status === 404)
@@ -114,6 +122,7 @@ async function* streamOllama(opts: CallOpts): AsyncGenerator<string> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: ollamaBody(c, opts, true),
+      cache: "no-store",
     });
   } catch {
     throw ollamaUnreachable(c);
@@ -146,11 +155,20 @@ async function* streamOllama(opts: CallOpts): AsyncGenerator<string> {
   }
 }
 
+// 매 호출마다 고유 URL을 만들어 Next.js/프록시의 GET 응답 캐시를 확실히 우회한다.
+// (연결 상태는 항상 '지금 이 순간'을 반영해야 하므로 절대 캐시되면 안 된다. Ollama는 쿼리스트링을 무시.)
+function tagsUrl(c: AiConfig): string {
+  return `${c.ollamaBaseUrl}/api/tags?_=${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 /** 설치된 로컬 모델 목록 (설정 UI 드롭다운용) */
 export async function getInstalledOllamaModels(): Promise<string[]> {
   const c = cfg();
   try {
-    const res = await fetch(`${c.ollamaBaseUrl}/api/tags`);
+    const res = await fetch(tagsUrl(c), {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return [];
     const data = (await res.json()) as { models?: { name: string }[] };
     return (data.models ?? []).map((m) => m.name);
@@ -232,7 +250,12 @@ export async function assertProviderReady(): Promise<void> {
   }
   let res: Response;
   try {
-    res = await fetch(`${c.ollamaBaseUrl}/api/tags`);
+    // 연결 점검은 빨리 실패해야 함 — Ollama 미실행 시 무한 대기 방지
+    // (캐시 금지 + 고유 URL — 매번 실제 상태를 확인해야 배지가 거짓말하지 않음)
+    res = await fetch(tagsUrl(c), {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
   } catch {
     throw ollamaUnreachable(c);
   }

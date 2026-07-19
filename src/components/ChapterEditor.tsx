@@ -14,6 +14,21 @@ function countChars(text: string): number {
   return [...text.replace(/\s/g, "")].length;
 }
 
+// 첫 글자가 이 시간 안에 안 오면 "멈춘 것"으로 보고 중단하고 안내한다.
+// (로컬 모델은 처음 켤 때 로딩+첫 토큰까지 오래 걸리므로 넉넉하게)
+// 느린 PC라면 .env.local 의 NEXT_PUBLIC_FIRST_BYTE_TIMEOUT_MS 로 늘릴 수 있다.
+const FIRST_BYTE_TIMEOUT_MS =
+  Number(process.env.NEXT_PUBLIC_FIRST_BYTE_TIMEOUT_MS) || 180_000;
+// 이 시간이 지나도 첫 글자가 없으면 "모델 준비 중" 안내를 띄운다.
+const SLOW_HINT_MS = 8000;
+
+interface AiStatus {
+  ok: boolean;
+  message: string;
+  provider: string;
+  model: string;
+}
+
 type GenMode = "auto" | "continue" | "regenerate";
 
 interface EditorWork {
@@ -95,12 +110,45 @@ export default function ChapterEditor({
   const [genInfo, setGenInfo] = useState<{ chars: number; secs: number } | null>(
     null,
   );
+  const [waitingFirst, setWaitingFirst] = useState(false);
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const [aiChecking, setAiChecking] = useState(false);
   const [tlSuggestions, setTlSuggestions] = useState<
     { description: string; involved_characters: string }[]
   >([]);
 
   const updatedAtRef = useRef(chapter.updated_at);
   const abortRef = useRef<AbortController | null>(null);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const genCharsRef = useRef(0);
+
+  // AI 연결 상태 점검 (편집 화면에서 바로 보이게)
+  async function checkAi() {
+    setAiChecking(true);
+    try {
+      const r = await fetch("/api/ai/status", { cache: "no-store" });
+      setAiStatus((await r.json()) as AiStatus);
+    } catch {
+      setAiStatus({
+        ok: false,
+        message: "상태를 확인하지 못했습니다.",
+        provider: ai.provider,
+        model: ai.model,
+      });
+    } finally {
+      setAiChecking(false);
+    }
+  }
+
+  useEffect(() => {
+    void checkAi();
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const dirty =
     title !== baseline.title ||
@@ -176,13 +224,42 @@ export default function ChapterEditor({
   }, [dirty, busy, conflict, title, beat, body, status, incC, incW]);
 
   async function generate(mode: GenMode) {
+    if (busy) return;
     setBusy(mode);
     setError(null);
     setConflict(null);
     const controller = new AbortController();
     abortRef.current = controller;
     const start = Date.now();
+    let gotFirstByte = false;
+    let timedOut = false;
+    genCharsRef.current = 0;
     setGenInfo({ chars: 0, secs: 0 });
+    setWaitingFirst(true);
+
+    // 실시간 경과 타이머: 토큰이 아직 안 와도 '초'는 계속 흐른다 → 멈춘 것처럼 안 보이게
+    tickRef.current = setInterval(() => {
+      setGenInfo({ chars: genCharsRef.current, secs: (Date.now() - start) / 1000 });
+    }, 200);
+    // 첫 글자가 제한 시간 안에 안 오면 자동 중단하고 안내
+    watchdogRef.current = setTimeout(() => {
+      if (!gotFirstByte) {
+        timedOut = true;
+        controller.abort();
+      }
+    }, FIRST_BYTE_TIMEOUT_MS);
+
+    const stopTimers = () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+      tickRef.current = null;
+      watchdogRef.current = null;
+    };
+    const timeoutMsg =
+      `AI가 ${FIRST_BYTE_TIMEOUT_MS / 1000}초 동안 아무 응답이 없어 중단했어요. ` +
+      `로컬(Ollama)이 안 켜졌거나 모델이 너무 클 수 있어요. ` +
+      `아래 ‘다시 확인’으로 연결 상태를 보거나, ⚙️ AI 설정에서 더 작은 모델(qwen2.5:3b) 또는 클라우드(Claude)로 바꿔보세요.`;
+
     try {
       let onceCondition = condition.trim();
       if (onceCondition && conditionMode === "persistent") {
@@ -216,6 +293,7 @@ export default function ChapterEditor({
       const base =
         mode === "continue" && body.trim() ? `${body.trimEnd()}\n\n` : "";
       let acc = base;
+      genCharsRef.current = countChars(acc);
       setBody(base);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -223,31 +301,41 @@ export default function ChapterEditor({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (!gotFirstByte) {
+            gotFirstByte = true;
+            setWaitingFirst(false);
+            if (watchdogRef.current) clearTimeout(watchdogRef.current);
+          }
           acc += decoder.decode(value, { stream: true });
+          genCharsRef.current = countChars(acc);
           setBody(acc);
-          setGenInfo({
-            chars: countChars(acc),
-            secs: (Date.now() - start) / 1000,
-          });
         }
       } catch (streamErr) {
         if (!(streamErr instanceof DOMException && streamErr.name === "AbortError"))
           throw streamErr;
-        // 중단됨 — 지금까지 받은 acc 유지
+        // 중단됨 (사용자 '중단' 또는 워치독) — 아래에서 분기 처리
       }
 
-      // 결과 자동 저장 (부분/전체)
-      await persist(acc);
+      if (timedOut && !gotFirstByte) {
+        setError(timeoutMsg);
+      } else if (gotFirstByte) {
+        // 첫 글자라도 받았을 때만 저장 (빈 응답으로 기존 본문을 덮어쓰지 않도록)
+        await persist(acc);
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
-        // 응답 전 중단 — 본문 변경 없음
+        if (timedOut) setError(timeoutMsg);
+        // 그 외: 사용자가 응답 전에 '중단' — 본문 변경 없음
       } else {
         setError(e instanceof Error ? e.message : "오류");
       }
     } finally {
+      stopTimers();
       abortRef.current = null;
       setBusy(null);
       setGenInfo(null);
+      setWaitingFirst(false);
+      void checkAi();
     }
   }
 
@@ -477,6 +565,39 @@ export default function ChapterEditor({
         </div>
       </div>
 
+      {/* AI 연결 상태 — 여기서 바로 확인 */}
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        {aiStatus === null ? (
+          <span className="rounded-full border border-ink-700 bg-ink-900 px-2 py-0.5 text-ink-400">
+            AI 상태 확인 중…
+          </span>
+        ) : aiStatus.ok ? (
+          <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+            ● AI 연결됨 · {aiStatus.provider === "ollama" ? "로컬 Ollama" : "Claude"} ·{" "}
+            {aiStatus.model}
+          </span>
+        ) : (
+          <span className="rounded-full border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-red-300">
+            ● AI 연결 안 됨 — 생성이 안 됩니다
+          </span>
+        )}
+        <button
+          className="text-ink-400 hover:text-ink-200 disabled:opacity-50"
+          onClick={checkAi}
+          disabled={aiChecking}
+        >
+          {aiChecking ? "확인 중…" : "다시 확인"}
+        </button>
+        <Link href="/settings" className="text-amber-400 hover:underline">
+          ⚙️ AI 설정
+        </Link>
+      </div>
+      {aiStatus && !aiStatus.ok && (
+        <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-200">
+          {aiStatus.message}
+        </div>
+      )}
+
       {/* AI 버튼 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button className="btn-primary" onClick={() => generate("auto")} disabled={busy !== null}>
@@ -504,6 +625,11 @@ export default function ChapterEditor({
         {genInfo && (
           <span className="text-xs text-ink-400">
             {genInfo.chars.toLocaleString()}자 · {genInfo.secs.toFixed(1)}초
+          </span>
+        )}
+        {generating && waitingFirst && genInfo && genInfo.secs * 1000 > SLOW_HINT_MS && (
+          <span className="text-xs text-amber-300">
+            ⏳ 첫 문장 준비 중… 로컬 모델은 처음 부를 때 수십 초~수 분 걸릴 수 있어요 (그대로 기다려 주세요)
           </span>
         )}
         <span className="flex-1" />
