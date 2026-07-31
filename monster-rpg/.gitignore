@@ -1,0 +1,12 @@
+# 빌드 산출물
+/cmake-build/
+/build/
+/build_test/
+*.o
+*.a
+*.exe
+
+# 에셋 파이프라인 산출물 (SPEC 2: assets/build 는 git 무시)
+/assets/build/
+
+# 용량 기록은 유지 (build_size.csv 는 커밋한다)

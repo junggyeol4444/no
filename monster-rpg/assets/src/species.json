@@ -1,0 +1,26 @@
+{
+  "_comment": "SPEC T1-1 종 3종. base 순서: HP,공격,방어,특수공격,특수방어,스피드 (SPEC 5-2).",
+  "species": [
+    {
+      "id": 1, "name": "불꽃도마뱀", "type1": "fire", "type2": "none",
+      "base": { "hp": 45, "atk": 60, "def": 45, "spa": 50, "spd": 45, "spe": 55 },
+      "catch_rate": 0, "base_exp": 0, "exp_curve": 1,
+      "breed_group": 0, "gender_ratio": 0, "hatch_tier": 0,
+      "learnset_offset": 0, "ability_pool": 0
+    },
+    {
+      "id": 2, "name": "물뱀", "type1": "water", "type2": "none",
+      "base": { "hp": 50, "atk": 50, "def": 55, "spa": 55, "spd": 50, "spe": 45 },
+      "catch_rate": 0, "base_exp": 0, "exp_curve": 1,
+      "breed_group": 0, "gender_ratio": 0, "hatch_tier": 0,
+      "learnset_offset": 0, "ability_pool": 0
+    },
+    {
+      "id": 3, "name": "새싹짐승", "type1": "wood", "type2": "none",
+      "base": { "hp": 55, "atk": 55, "def": 50, "spa": 45, "spd": 55, "spe": 45 },
+      "catch_rate": 0, "base_exp": 0, "exp_curve": 1,
+      "breed_group": 0, "gender_ratio": 0, "hatch_tier": 0,
+      "learnset_offset": 0, "ability_pool": 0
+    }
+  ]
+}

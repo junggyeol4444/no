@@ -1,0 +1,13 @@
+{
+  "_comment": "SPEC T1-1 스킬 8개. gene_cond stat: hp/atk/def/spa/spd/spe = 1..6 (SPEC 5-5).",
+  "moves": [
+    { "id": 1, "name": "들이받기",   "type": "fire",  "class": "physical", "power": 40,  "accuracy": 100, "pp": 35, "priority": 0, "effect_id": 0, "gene_cond": { "target": "none" } },
+    { "id": 2, "name": "불꽃송곳니", "type": "fire",  "class": "physical", "power": 55,  "accuracy": 95,  "pp": 25, "priority": 0, "effect_id": 0, "gene_cond": { "target": "none" } },
+    { "id": 3, "name": "물대포",     "type": "water", "class": "special",  "power": 50,  "accuracy": 100, "pp": 25, "priority": 0, "effect_id": 0, "gene_cond": { "target": "none" } },
+    { "id": 4, "name": "덩굴채찍",   "type": "wood",  "class": "physical", "power": 45,  "accuracy": 100, "pp": 25, "priority": 0, "effect_id": 0, "gene_cond": { "target": "none" } },
+    { "id": 5, "name": "단단해지기", "type": "earth", "class": "status",   "power": 0,   "accuracy": 101, "pp": 20, "priority": 0, "effect_id": 0, "gene_cond": { "target": "none" } },
+    { "id": 6, "name": "화염폭발",   "type": "fire",  "class": "special",  "power": 95,  "accuracy": 90,  "pp": 10, "priority": 0, "effect_id": 0, "gene_cond": { "target": "dominant",  "stat": "spa", "threshold": 10 } },
+    { "id": 7, "name": "바위깨기",   "type": "earth", "class": "physical", "power": 85,  "accuracy": 90,  "pp": 10, "priority": 0, "effect_id": 0, "gene_cond": { "target": "dominant",  "stat": "atk", "threshold": 10 } },
+    { "id": 8, "name": "야성의송곳니", "type": "dark", "class": "physical", "power": 110, "accuracy": 85,  "pp": 5,  "priority": 0, "effect_id": 0, "gene_cond": { "target": "recessive", "stat": "atk", "threshold": 12 } }
+  ]
+}
