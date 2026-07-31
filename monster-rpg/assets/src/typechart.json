@@ -1,0 +1,17 @@
+{
+  "_comment": "SPEC 5-6 P1 상성표. code 0=x0.0 / 1=x0.5 / 2=x1.0 / 3=x2.0. 미지정은 default.",
+  "default": 2,
+  "overrides": [
+    { "atk": "fire",  "def": "wood",  "code": 3 },
+    { "atk": "fire",  "def": "water", "code": 1 },
+    { "atk": "fire",  "def": "earth", "code": 1 },
+    { "atk": "water", "def": "fire",  "code": 3 },
+    { "atk": "water", "def": "earth", "code": 3 },
+    { "atk": "water", "def": "wood",  "code": 1 },
+    { "atk": "wood",  "def": "earth", "code": 3 },
+    { "atk": "wood",  "def": "water", "code": 3 },
+    { "atk": "wood",  "def": "fire",  "code": 1 },
+    { "atk": "earth", "def": "wood",  "code": 1 },
+    { "atk": "earth", "def": "water", "code": 1 }
+  ]
+}
